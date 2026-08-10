@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "retro-tools"
+version = "0.1.0"
+description = "Tools for organizing retro game ROMs for NextUI / MinUI handhelds"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+retro-tools = "retro_tools.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["retro_tools*"]
