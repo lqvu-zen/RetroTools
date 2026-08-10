@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from retro_tools import __version__
+from retro_tools.cheats import plan_cheats
 from retro_tools.discs import is_candidate_file
 from retro_tools.m3u import (
     find_system_folders,
@@ -62,6 +63,70 @@ def cmd_m3u(args: argparse.Namespace) -> int:
         root, single_disc_folders=args.single_disc_folders, layout=args.layout
     )
     _print_plan(plan, root, apply=args.apply)
+
+    if plan.is_empty:
+        return 0
+
+    if not args.apply:
+        print("\nNothing was changed. Re-run with --apply to make it so.")
+        return 0
+
+    try:
+        execute(plan, force=args.force)
+    except PlanError as exc:
+        print("\nerror: refusing to apply:\n{}".format(exc), file=sys.stderr)
+        return 1
+
+    print("\nApplied.")
+    return 0
+
+
+def _print_cheats_plan(plan: Plan, root: Path, apply: bool) -> None:
+    # .cht files can run to dozens of long code lines each, so unlike
+    # _print_plan(), this deliberately never echoes write content -- just
+    # target paths, plus the per-system match-count notes which are what
+    # actually matters for reviewing coverage.
+    for note in plan.notes:
+        print("  note: {}".format(note))
+    if plan.notes:
+        print()
+
+    if plan.is_empty:
+        print("Nothing to do.")
+    else:
+        header = "Cheat files to write" if apply else "Planned cheat files (dry run)"
+        print("{}:".format(header))
+        for action in plan.actions:
+            try:
+                rel = action.target.relative_to(root)
+            except ValueError:
+                rel = action.target
+            print("  write  {}".format(rel))
+        print("\n{} cheat file(s).".format(plan.counts()["write"]))
+
+    if plan.warnings:
+        print("\nWarnings:")
+        for warning in plan.warnings:
+            print("  ! {}".format(warning))
+
+
+def cmd_cheats(args: argparse.Namespace) -> int:
+    roms_root = Path(args.path).expanduser()
+    cheats_root = Path(args.cheats_root).expanduser()
+    cht_root = Path(args.cht_db).expanduser()
+
+    if not roms_root.exists():
+        print("error: path does not exist: {}".format(roms_root), file=sys.stderr)
+        return 2
+    if not cht_root.is_dir():
+        print(
+            "error: cht database folder not found: {}".format(cht_root),
+            file=sys.stderr,
+        )
+        return 2
+
+    plan = plan_cheats(roms_root, cheats_root, cht_root)
+    _print_cheats_plan(plan, cheats_root, apply=args.apply)
 
     if plan.is_empty:
         return 0
@@ -180,6 +245,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing .m3u files.",
     )
     m3u.set_defaults(func=cmd_m3u)
+
+    cheats = subparsers.add_parser(
+        "cheats",
+        help="Match ROMs against a libretro cheat database and write .cht files.",
+        description=(
+            "Matches each game in your Roms folder (or a single system "
+            "folder) against a local checkout of the libretro-database cht/ "
+            "folder, and writes a NextUI/MinUI-format .cht file for every "
+            "match under --cheats-root/<TAG>/. Systems with no known mapping "
+            "to a cht console folder are skipped and reported. Dry run "
+            "unless --apply is given. See TAG_TO_CHT_CONSOLE in "
+            "retro_tools/cheats.py for the current system mapping."
+        ),
+    )
+    cheats.add_argument("path", help="Your Roms folder, or a single system folder.")
+    cheats.add_argument(
+        "--cheats-root",
+        required=True,
+        help="Where to write <TAG>/<name>.cht files, e.g. SDCARD/Cheats.",
+    )
+    cheats.add_argument(
+        "--cht-db",
+        required=True,
+        help="Local checkout of libretro-database's cht/ folder.",
+    )
+    cheats.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually write the .cht files.",
+    )
+    cheats.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing .cht files that don't already match.",
+    )
+    cheats.set_defaults(func=cmd_cheats)
 
     return parser
 

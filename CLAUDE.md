@@ -18,6 +18,11 @@ Two target layouts, picked with `--layout`:
   written next to the existing disc files, nothing gets moved.
   `--single-disc-folders` (NextUI-only) is rejected in this layout.
 
+There's also a `cheats` subcommand: it matches ROMs against a local checkout
+of the [libretro-database](https://github.com/libretro/libretro-database)
+`cht/` folder and writes NextUI/MinUI-format `.cht` files under a separate
+`--cheats-root`. See `cheats.py` below.
+
 ## Commands
 
 Run tests:
@@ -49,10 +54,11 @@ There is no lint/format tooling configured in this repo.
 
 Everything is a **dry run by default** — `--apply` is the only thing that
 touches the filesystem. This is implemented as a strict plan/execute split
-across four modules with a one-directional dependency chain:
+across five modules with a one-directional dependency chain:
 
 ```
 discs.py -> plan.py -> m3u.py -> cli.py
+                     -> cheats.py -> cli.py
 ```
 
 - **`discs.py`** — pure parsing/grouping, no filesystem writes. `parse_disc()`
@@ -97,9 +103,33 @@ discs.py -> plan.py -> m3u.py -> cli.py
   filename still matches a real file — anything else is a warning, not a
   guess.
 
-- **`cli.py`** — argparse front end (`scan`, `m3u` subcommands). Thin: builds
-  a plan, prints it via `_print_plan()`, and only calls `plan.execute()` when
-  `--apply` is passed.
+- **`cheats.py`** — matches ROMs against a local libretro-database `cht/`
+  checkout and plans NextUI/MinUI `.cht` files. `TAG_TO_CHT_CONSOLE` maps a
+  NextUI `(TAG)` to a cht console folder name; only confident, unambiguous
+  mappings are listed, everything else is reported as unmapped rather than
+  guessed. `iter_launch_targets()` enumerates what NextUI's menu actually
+  shows for a system folder — reusing `m3u.py`'s exact convention: a
+  subfolder counts only if it holds a `<folder-name>.m3u` (this is true for
+  *any* folder-launched game, not just multi-disc ones — confirmed from
+  NextUI's own `Game_open()` C source, which always re-derives the cheat
+  lookup name from that sibling m3u when present). `plan_cheats_for_system()`
+  matches each target's title against the cht folder's index
+  (`_load_cht_index()`, keyed by title with any trailing device tag —
+  `(Game Genie)`, `(GameShark)`, etc., stripped via `_strip_device_suffix()`)
+  and writes whichever `.cht` file `_variant_rank()` ranks best: a plain
+  (unsuffixed) file always wins outright; when only device-specific variants
+  exist, the pick is still automatic but comes with a `plan.warn()`, since
+  NextUI only ever loads one `.cht` per game and there's no plain file to
+  fall back on. No match at all is not warned about (expected at this scale,
+  e.g. romhacks/translations with no upstream cheat entry) — only summarized
+  via a per-system `plan.note()` of matched-vs-total.
+
+- **`cli.py`** — argparse front end (`scan`, `m3u`, `cheats` subcommands).
+  Thin: builds a plan, prints it, and only calls `plan.execute()` when
+  `--apply` is passed. `m3u` and `scan` share `_print_plan()`; `cheats` has
+  its own `_print_cheats_plan()` since `.cht` files can run to dozens of long
+  code lines each — it prints target paths and the per-system match-count
+  notes, never write content.
 
 Ambiguous or unsafe-to-silently-resolve situations (multiple cue sheets for
 one disc, a folder mixing several games, a playlist whose name doesn't match
