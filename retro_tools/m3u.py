@@ -1,15 +1,23 @@
-"""Planners for NextUI multi-disc layout and .m3u playlists.
+"""Planners for multi-disc layout and .m3u playlists.
 
-NextUI launches a folder directly (instead of navigating into it) when the
-folder contains a playlist or cue sheet matching the folder's own name::
+Two layouts are supported, picked with ``layout=``:
+
+``"nextui"`` (the default) -- for NextUI/MinUI, which launch a folder
+directly (instead of navigating into it) when the folder contains a
+playlist or cue sheet matching the folder's own name::
 
     Roms/PlayStation (PS)/Final Fantasy VII (USA)/
         Final Fantasy VII (USA).m3u
         Final Fantasy VII (USA) (Disc 1).cue
         ...
 
-That is what these planners produce. All discs launched through one .m3u
-share a memory card and save-state slot, and can be swapped in-game.
+``"flat"`` -- for RetroArch and other libretro-based frontends, which read
+a standard .m3u multi-disc playlist wherever it sits and have no notion of
+folder-launch. The playlist is written next to the disc files; nothing is
+moved, and single-disc folders are never created.
+
+Either way, all discs launched through one .m3u share a memory card and
+save-state slot, and can be swapped in-game.
 """
 
 from __future__ import annotations
@@ -58,8 +66,12 @@ def looks_like_roms_root(directory: Path) -> bool:
 # --------------------------------------------------------------------------
 
 
-def _plan_group(group: DiscGroup, plan: Plan, label: str) -> None:
-    """Plan folder + moves + playlist for one loose multi-disc group."""
+def _validated_playlist_lines(group: DiscGroup, plan: Plan, label: str) -> Optional[List[str]]:
+    """The .m3u lines for *group*, warning about any problems along the way.
+
+    Returns ``None`` when there's no loadable file for every disc, meaning no
+    playlist can be written at all.
+    """
     lines = group.playlist_lines()
     if len(lines) < 2:
         plan.warn(
@@ -67,14 +79,14 @@ def _plan_group(group: DiscGroup, plan: Plan, label: str) -> None:
                 label, group.base
             )
         )
-        return
+        return None
 
     for number in group.numbers:
         entry = group.playlist_entry(number)
         if entry is None:
             plan.warn(
-                "{}: '{}' disc {} has no loadable file; it will be moved but "
-                "left out of the playlist".format(label, group.base, number)
+                "{}: '{}' disc {} has no loadable file; left out of the "
+                "playlist".format(label, group.base, number)
             )
             continue
         sheets = [p for p in group.discs[number] if p.suffix.lower() in SHEET_EXTS]
@@ -88,6 +100,14 @@ def _plan_group(group: DiscGroup, plan: Plan, label: str) -> None:
                     entry.name,
                 )
             )
+    return lines
+
+
+def _plan_group(group: DiscGroup, plan: Plan, label: str) -> None:
+    """NextUI layout: folder + moves + playlist for one multi-disc group."""
+    lines = _validated_playlist_lines(group, plan, label)
+    if lines is None:
+        return
 
     target_dir = group.directory / group.base
     if target_dir.exists() and target_dir.is_dir():
@@ -99,6 +119,23 @@ def _plan_group(group: DiscGroup, plan: Plan, label: str) -> None:
         plan.move(path, target_dir / path.name)
 
     plan.write(target_dir / group.m3u_name, "\n".join(lines) + "\n")
+
+
+def _plan_group_flat(group: DiscGroup, plan: Plan, label: str) -> None:
+    """Flat layout: just the playlist for one multi-disc group; files stay put.
+
+    Unlike the NextUI layout, the disc files are never moved out of sight, so
+    every run would otherwise rediscover the same group and re-queue an
+    identical write. Skip it once the playlist already says the right thing.
+    """
+    lines = _validated_playlist_lines(group, plan, label)
+    if lines is None:
+        return
+    target = group.directory / group.m3u_name
+    content = "\n".join(lines) + "\n"
+    if target.is_file() and target.read_text(encoding="utf-8") == content:
+        return
+    plan.write(target, content)
 
 
 def _relocated_playlist_lines(content: str, filenames: set) -> Optional[List[str]]:
@@ -204,7 +241,8 @@ def _plan_existing_folder(folder: Path, plan: Plan, label: str) -> None:
         wanted = folder.name.casefold() + ".m3u"
         if not any(p.name.casefold() == wanted for p in existing_m3u):
             plan.warn(
-                "{}: folder '{}' has '{}' but NextUI expects '{}.m3u'".format(
+                "{}: folder '{}' has '{}' but a playlist here should be "
+                "named '{}.m3u'".format(
                     label, folder.name, existing_m3u[0].name, folder.name
                 )
             )
@@ -223,12 +261,23 @@ def _plan_existing_folder(folder: Path, plan: Plan, label: str) -> None:
     plan.write(folder / (folder.name + ".m3u"), "\n".join(lines) + "\n")
 
 
+#: Frontends supported by ``layout=``. See the module docstring for what
+#: each one produces.
+LAYOUTS = ("nextui", "flat")
+
+
 def plan_system_folder(
     directory: Path,
     single_disc_folders: bool = False,
     recurse: bool = True,
+    layout: str = "nextui",
 ) -> Plan:
     """Build the plan for one system folder, e.g. ``Roms/PlayStation (PS)``."""
+    if layout not in LAYOUTS:
+        raise ValueError("unknown layout: {!r}".format(layout))
+    if layout == "flat" and single_disc_folders:
+        raise ValueError("single_disc_folders has no effect with layout='flat'")
+
     plan = Plan()
     if not directory.is_dir():
         plan.warn("not a folder: {}".format(directory))
@@ -236,6 +285,7 @@ def plan_system_folder(
 
     label = directory.name
 
+    group_planner = _plan_group_flat if layout == "flat" else _plan_group
     loose = [p for p in directory.iterdir() if is_candidate_file(p)]
     for group in group_discs(loose):
         if len(group.numbers) < 2:
@@ -245,7 +295,7 @@ def plan_system_folder(
                 )
             )
             continue
-        _plan_group(group, plan, label)
+        group_planner(group, plan, label)
 
     if single_disc_folders:
         _plan_single_disc_folders(directory, plan, label)
@@ -261,6 +311,7 @@ def plan_system_folder(
 def plan_path(
     path: Path,
     single_disc_folders: bool = False,
+    layout: str = "nextui",
 ) -> Plan:
     """Plan for either a Roms root or a single system folder."""
     plan = Plan()
@@ -277,7 +328,9 @@ def plan_path(
         )
         for folder in folders:
             plan.extend(
-                plan_system_folder(folder, single_disc_folders=single_disc_folders)
+                plan_system_folder(
+                    folder, single_disc_folders=single_disc_folders, layout=layout
+                )
             )
         return plan
 
@@ -287,5 +340,9 @@ def plan_path(
                 path.name or str(path)
             )
         )
-    plan.extend(plan_system_folder(path, single_disc_folders=single_disc_folders))
+    plan.extend(
+        plan_system_folder(
+            path, single_disc_folders=single_disc_folders, layout=layout
+        )
+    )
     return plan

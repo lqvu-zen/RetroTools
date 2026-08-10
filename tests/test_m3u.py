@@ -3,7 +3,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from retro_tools.m3u import find_system_folders, looks_like_roms_root, plan_path
+from retro_tools.m3u import (
+    find_system_folders,
+    looks_like_roms_root,
+    plan_path,
+    plan_system_folder,
+)
 from retro_tools.plan import PlanError, execute, validate
 
 
@@ -276,6 +281,58 @@ class SafetyTests(TempTreeTestCase):
         plan = plan_path(system)
         problems = validate(plan)
         self.assertTrue(any("already exists" in p for p in problems))
+
+
+class FlatLayoutTests(TempTreeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.system = self.root / "PlayStation (PS)"
+        self.system.mkdir(parents=True)
+        for disc in (1, 2, 3):
+            touch(self.system / "Final Fantasy VII (USA) (Disc {}).cue".format(disc))
+        touch(self.system / "Castlevania SOTN (USA).chd")
+
+    def test_writes_playlist_without_moving_files(self):
+        execute(plan_path(self.system, layout="flat"))
+
+        m3u = self.system / "Final Fantasy VII (USA).m3u"
+        self.assertTrue(m3u.is_file())
+        self.assertEqual(
+            m3u.read_text(encoding="utf-8").splitlines(),
+            [
+                "Final Fantasy VII (USA) (Disc 1).cue",
+                "Final Fantasy VII (USA) (Disc 2).cue",
+                "Final Fantasy VII (USA) (Disc 3).cue",
+            ],
+        )
+        # discs stay right where they were, no folder created
+        self.assertEqual(len(list(self.system.glob("*.cue"))), 3)
+        self.assertFalse((self.system / "Final Fantasy VII (USA)").exists())
+
+    def test_dry_run_changes_nothing(self):
+        before = sorted(p.name for p in self.system.iterdir())
+        plan = plan_path(self.system, layout="flat")
+        self.assertFalse(plan.is_empty)
+        self.assertEqual(before, sorted(p.name for p in self.system.iterdir()))
+
+    def test_rerun_is_a_no_op(self):
+        execute(plan_path(self.system, layout="flat"))
+        second = plan_path(self.system, layout="flat")
+        self.assertTrue(second.is_empty, second.actions)
+
+    def test_single_disc_game_left_alone(self):
+        execute(plan_path(self.system, layout="flat"))
+        self.assertTrue((self.system / "Castlevania SOTN (USA).chd").is_file())
+
+    def test_single_disc_folders_rejected_with_flat_layout(self):
+        with self.assertRaises(ValueError):
+            plan_system_folder(
+                self.system, single_disc_folders=True, layout="flat"
+            )
+
+    def test_unknown_layout_rejected(self):
+        with self.assertRaises(ValueError):
+            plan_system_folder(self.system, layout="snes9x")
 
 
 if __name__ == "__main__":

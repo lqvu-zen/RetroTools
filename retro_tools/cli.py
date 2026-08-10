@@ -45,12 +45,22 @@ def _print_plan(plan: Plan, root: Optional[Path], apply: bool) -> None:
 
 
 def cmd_m3u(args: argparse.Namespace) -> int:
+    if args.layout == "flat" and args.single_disc_folders:
+        print(
+            "error: --single-disc-folders has no effect with --layout flat "
+            "(nothing gets moved into folders in that layout)",
+            file=sys.stderr,
+        )
+        return 2
+
     root = Path(args.path).expanduser()
     if not root.exists():
         print("error: path does not exist: {}".format(root), file=sys.stderr)
         return 2
 
-    plan = plan_path(root, single_disc_folders=args.single_disc_folders)
+    plan = plan_path(
+        root, single_disc_folders=args.single_disc_folders, layout=args.layout
+    )
     _print_plan(plan, root, apply=args.apply)
 
     if plan.is_empty:
@@ -114,7 +124,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="retro-tools",
-        description="Organize retro game ROMs for NextUI handhelds.",
+        description="Organize retro game ROMs for handheld frontends.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -127,15 +137,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     m3u = subparsers.add_parser(
         "m3u",
-        help="Group multi-disc games into folders and write .m3u playlists.",
+        help="Group multi-disc games and write .m3u playlists.",
         description=(
-            "Finds multi-disc games (Disc 1 / Disc 2 / ...), moves each game's "
-            "files into a folder named after the game, and writes a matching "
-            ".m3u playlist so NextUI launches it directly and shares saves "
-            "across discs. Dry run unless --apply is given."
+            "Finds multi-disc games (Disc 1 / Disc 2 / ...) and writes a "
+            "matching .m3u playlist so discs launch as one game and share "
+            "saves. With --layout nextui (the default), each game's files "
+            "also move into a folder named after the game, so NextUI/MinUI "
+            "launch the folder directly. With --layout flat, the playlist is "
+            "written next to the disc files and nothing is moved, for "
+            "RetroArch and other libretro-based frontends. Dry run unless "
+            "--apply is given."
         ),
     )
     m3u.add_argument("path", help="Your Roms folder, or a single system folder.")
+    m3u.add_argument(
+        "--layout",
+        choices=("nextui", "flat"),
+        default="nextui",
+        help=(
+            "Target frontend convention: 'nextui' (default) groups each game "
+            "into its own folder for NextUI/MinUI; 'flat' just writes the "
+            ".m3u beside the existing files, for RetroArch/libretro."
+        ),
+    )
     m3u.add_argument(
         "--apply",
         action="store_true",
@@ -145,8 +169,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--single-disc-folders",
         action="store_true",
         help=(
-            "Also tuck loose single-disc bin/cue sets into their own folder, "
-            "so NextUI launches the cue instead of showing the folder."
+            "Also tuck loose single-disc releases into their own folder, "
+            "so NextUI/MinUI launches the game directly instead of showing "
+            "the folder. Only valid with --layout nextui."
         ),
     )
     m3u.add_argument(
