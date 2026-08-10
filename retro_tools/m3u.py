@@ -101,13 +101,28 @@ def _plan_group(group: DiscGroup, plan: Plan, label: str) -> None:
     plan.write(target_dir / group.m3u_name, "\n".join(lines) + "\n")
 
 
+def _relocated_playlist_lines(content: str, filenames: set) -> Optional[List[str]]:
+    """Re-point a playlist's entries at *filenames* sitting beside it.
+
+    Returns the corrected lines, or ``None`` if any entry doesn't refer to one
+    of *filenames* (an unrelated/mismatched playlist we shouldn't touch).
+    """
+    lines = []
+    for raw in content.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        name = stripped.replace("\\", "/").rsplit("/", 1)[-1]
+        if name not in filenames:
+            return None
+        lines.append(name)
+    return lines
+
+
 def _plan_single_disc_folders(directory: Path, plan: Plan, label: str) -> None:
-    """Tuck loose single-disc bin/cue sets into their own folder."""
+    """Tuck every loose single-disc release into its own same-named folder."""
     candidates = [p for p in directory.iterdir() if is_candidate_file(p)]
     for stem, files in group_by_stem(candidates).items():
-        sheets = [p for p in files if p.suffix.lower() in SHEET_EXTS]
-        if not sheets or len(files) < 2:
-            continue
         target_dir = directory / stem
         if target_dir.exists() and target_dir.is_dir():
             plan.note("{}: reusing existing folder '{}'".format(label, stem))
@@ -115,6 +130,50 @@ def _plan_single_disc_folders(directory: Path, plan: Plan, label: str) -> None:
             plan.mkdir(target_dir)
         for path in files:
             plan.move(path, target_dir / path.name)
+
+        sibling_m3u = directory / (stem + ".m3u")
+        if sibling_m3u.is_file():
+            new_path = target_dir / sibling_m3u.name
+            plan.move(sibling_m3u, new_path)
+
+            filenames = {path.name for path in files}
+            content = sibling_m3u.read_text(encoding="utf-8")
+            fixed = _relocated_playlist_lines(content, filenames)
+            if fixed is None:
+                plan.warn(
+                    "{}: '{}' has a playlist that doesn't reference its own "
+                    "file(s); moved as-is, left unfixed".format(label, stem)
+                )
+            elif fixed != content.splitlines():
+                plan.write(new_path, "\n".join(fixed) + "\n")
+
+
+def _adopt_orphaned_playlist(
+    folder: Path, candidates: List[Path], plan: Plan, label: str
+) -> None:
+    """Pull a stray ``<folder-name>.m3u`` from the parent into *folder*.
+
+    Handles games that were already tucked into their own single-file folder
+    by an earlier run, before that file's matching playlist was moved along
+    with it. Fixes up stale path prefixes the same way a fresh move does.
+    """
+    orphan = folder.parent / (folder.name + ".m3u")
+    if not orphan.is_file():
+        return
+
+    filenames = {path.name for path in candidates}
+    content = orphan.read_text(encoding="utf-8")
+    new_path = folder / orphan.name
+    plan.move(orphan, new_path)
+
+    fixed = _relocated_playlist_lines(content, filenames)
+    if fixed is None:
+        plan.warn(
+            "{}: '{}' has a loose playlist that doesn't reference its own "
+            "file(s); moved as-is, left unfixed".format(label, folder.name)
+        )
+    elif fixed != content.splitlines():
+        plan.write(new_path, "\n".join(fixed) + "\n")
 
 
 def _plan_existing_folder(folder: Path, plan: Plan, label: str) -> None:
@@ -126,6 +185,8 @@ def _plan_existing_folder(folder: Path, plan: Plan, label: str) -> None:
     existing_m3u = sorted(folder.glob("*.m3u"))
     groups = group_discs(candidates)
     if not groups:
+        if not existing_m3u and len(candidates) == 1:
+            _adopt_orphaned_playlist(folder, candidates, plan, label)
         return
     if len(groups) > 1:
         plan.warn(

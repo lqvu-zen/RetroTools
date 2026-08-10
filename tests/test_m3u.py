@@ -109,6 +109,35 @@ class PlanExistingFolderTests(TempTreeTestCase):
         self.assertTrue(plan.warnings)
         self.assertIn("Weird Folder Name.m3u", plan.warnings[0])
 
+    def test_adopts_orphaned_playlist_left_behind_by_earlier_run(self):
+        system = self.root / "PlayStation (PS)"
+        game = system / "Ace Combat 2"
+        game.mkdir(parents=True)
+        touch(game / "Ace Combat 2.chd")
+        touch(system / "Ace Combat 2.m3u", "_hidden/Ace Combat 2.chd\n")
+
+        execute(plan_path(system))
+        self.assertFalse((system / "Ace Combat 2.m3u").exists())
+        self.assertEqual(
+            (game / "Ace Combat 2.m3u").read_text(encoding="utf-8"),
+            "Ace Combat 2.chd\n",
+        )
+
+    def test_orphaned_playlist_mismatch_warns(self):
+        system = self.root / "PlayStation (PS)"
+        game = system / "Ace Combat 2"
+        game.mkdir(parents=True)
+        touch(game / "Ace Combat 2.chd")
+        touch(system / "Ace Combat 2.m3u", "_hidden/Some Other Game.chd\n")
+
+        plan = plan_path(system)
+        execute(plan)
+        self.assertTrue(plan.warnings)
+        self.assertEqual(
+            (game / "Ace Combat 2.m3u").read_text(encoding="utf-8"),
+            "_hidden/Some Other Game.chd\n",
+        )
+
 
 class SingleDiscFolderTests(TempTreeTestCase):
     def test_bin_cue_pair_moved_into_folder(self):
@@ -122,8 +151,59 @@ class SingleDiscFolderTests(TempTreeTestCase):
         folder = system / "Tony Hawk's Pro Skater 2 (USA)"
         self.assertTrue((folder / "Tony Hawk's Pro Skater 2 (USA).cue").is_file())
         self.assertTrue((folder / "Tony Hawk's Pro Skater 2 (USA).bin").is_file())
-        # a lone .chd needs no folder
-        self.assertTrue((system / "Standalone.chd").is_file())
+
+        standalone = system / "Standalone" / "Standalone.chd"
+        self.assertTrue(standalone.is_file())
+
+    def test_lone_single_file_moved_into_folder(self):
+        system = self.root / "PlayStation (PS)"
+        system.mkdir(parents=True)
+        touch(system / "Ace Combat 2 (USA).chd")
+
+        execute(plan_path(system, single_disc_folders=True))
+        self.assertTrue(
+            (system / "Ace Combat 2 (USA)" / "Ace Combat 2 (USA).chd").is_file()
+        )
+
+    def test_sibling_playlist_moves_along_with_lone_file(self):
+        system = self.root / "PlayStation (PS)"
+        system.mkdir(parents=True)
+        touch(system / "Ace Combat 2 (USA).chd")
+        touch(system / "Ace Combat 2 (USA).m3u", "Ace Combat 2 (USA).chd\n")
+
+        execute(plan_path(system, single_disc_folders=True))
+        folder = system / "Ace Combat 2 (USA)"
+        self.assertTrue((folder / "Ace Combat 2 (USA).chd").is_file())
+        self.assertTrue((folder / "Ace Combat 2 (USA).m3u").is_file())
+        self.assertFalse((system / "Ace Combat 2 (USA).m3u").exists())
+
+    def test_sibling_playlist_stale_prefix_is_corrected(self):
+        system = self.root / "PlayStation (PS)"
+        system.mkdir(parents=True)
+        touch(system / "Ace Combat 2 (USA).chd")
+        touch(system / "Ace Combat 2 (USA).m3u", "_hidden/Ace Combat 2 (USA).chd\n")
+
+        execute(plan_path(system, single_disc_folders=True))
+        folder = system / "Ace Combat 2 (USA)"
+        self.assertEqual(
+            (folder / "Ace Combat 2 (USA).m3u").read_text(encoding="utf-8"),
+            "Ace Combat 2 (USA).chd\n",
+        )
+
+    def test_sibling_playlist_mismatch_warns_and_is_left_unfixed(self):
+        system = self.root / "PlayStation (PS)"
+        system.mkdir(parents=True)
+        touch(system / "Ace Combat 2 (USA).chd")
+        touch(system / "Ace Combat 2 (USA).m3u", "_hidden/Some Other Game.chd\n")
+
+        plan = plan_path(system, single_disc_folders=True)
+        execute(plan)
+        self.assertTrue(plan.warnings)
+        folder = system / "Ace Combat 2 (USA)"
+        self.assertEqual(
+            (folder / "Ace Combat 2 (USA).m3u").read_text(encoding="utf-8"),
+            "_hidden/Some Other Game.chd\n",
+        )
 
     def test_not_done_without_the_flag(self):
         system = self.root / "PlayStation (PS)"
