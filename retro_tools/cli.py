@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import shlex
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 from retro_tools import __version__
 from retro_tools.cheats import plan_cheats
@@ -19,30 +21,57 @@ from retro_tools.m3u import (
 from retro_tools.plan import Plan, PlanError, execute
 
 
-def _print_plan(plan: Plan, root: Optional[Path], apply: bool) -> None:
+def _render_plan(plan: Plan, root: Optional[Path], apply: bool) -> List[str]:
+    lines = []
     for note in plan.notes:
-        print("  note: {}".format(note))
+        lines.append("  note: {}".format(note))
     if plan.notes:
-        print()
+        lines.append("")
 
     if plan.is_empty:
-        print("Nothing to do.")
+        lines.append("Nothing to do.")
     else:
         header = "Actions" if apply else "Planned actions (dry run)"
-        print("{}:".format(header))
+        lines.append("{}:".format(header))
         for action in plan.actions:
-            print("  " + action.describe(root))
+            lines.append("  " + action.describe(root))
         counts = plan.counts()
-        print(
+        lines.append(
             "\n{} folder(s), {} move(s), {} playlist(s).".format(
                 counts["mkdir"], counts["move"], counts["write"]
             )
         )
 
     if plan.warnings:
-        print("\nWarnings:")
+        lines.append("\nWarnings:")
         for warning in plan.warnings:
-            print("  ! {}".format(warning))
+            lines.append("  ! {}".format(warning))
+    return lines
+
+
+def _print_plan(plan: Plan, root: Optional[Path], apply: bool) -> List[str]:
+    lines = _render_plan(plan, root, apply)
+    print("\n".join(lines))
+    return lines
+
+
+def _write_run_log(directory: Path, prefix: str, lines: List[str]) -> Path:
+    """Record what an --apply run did. Never called for a dry run -- writing
+    a log is itself a filesystem write, and dry runs must touch nothing."""
+    directory.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now()
+    log_path = directory / ".retro-tools-{}-log-{}.txt".format(
+        prefix, timestamp.strftime("%Y%m%d-%H%M%S")
+    )
+    header = [
+        "retro-tools {} run log".format(prefix),
+        "when: {}".format(timestamp.isoformat(timespec="seconds")),
+        "command: {}".format(shlex.join(sys.argv)),
+        "",
+    ]
+    with open(log_path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(header + lines) + "\n")
+    return log_path
 
 
 def cmd_m3u(args: argparse.Namespace) -> int:
@@ -62,7 +91,7 @@ def cmd_m3u(args: argparse.Namespace) -> int:
     plan = plan_path(
         root, single_disc_folders=args.single_disc_folders, layout=args.layout
     )
-    _print_plan(plan, root, apply=args.apply)
+    lines = _print_plan(plan, root, apply=args.apply)
 
     if plan.is_empty:
         return 0
@@ -75,39 +104,50 @@ def cmd_m3u(args: argparse.Namespace) -> int:
         execute(plan, force=args.force)
     except PlanError as exc:
         print("\nerror: refusing to apply:\n{}".format(exc), file=sys.stderr)
+        lines = lines + ["", "ERROR: refusing to apply:", str(exc)]
+        print("\nLog written to: {}".format(_write_run_log(root, "m3u", lines)))
         return 1
 
     print("\nApplied.")
+    print("Log written to: {}".format(_write_run_log(root, "m3u", lines)))
     return 0
 
 
-def _print_cheats_plan(plan: Plan, root: Path, apply: bool) -> None:
+def _render_cheats_plan(plan: Plan, root: Path, apply: bool) -> List[str]:
     # .cht files can run to dozens of long code lines each, so unlike
-    # _print_plan(), this deliberately never echoes write content -- just
+    # _render_plan(), this deliberately never echoes write content -- just
     # target paths, plus the per-system match-count notes which are what
     # actually matters for reviewing coverage.
+    lines = []
     for note in plan.notes:
-        print("  note: {}".format(note))
+        lines.append("  note: {}".format(note))
     if plan.notes:
-        print()
+        lines.append("")
 
     if plan.is_empty:
-        print("Nothing to do.")
+        lines.append("Nothing to do.")
     else:
         header = "Cheat files to write" if apply else "Planned cheat files (dry run)"
-        print("{}:".format(header))
+        lines.append("{}:".format(header))
         for action in plan.actions:
             try:
                 rel = action.target.relative_to(root)
             except ValueError:
                 rel = action.target
-            print("  write  {}".format(rel))
-        print("\n{} cheat file(s).".format(plan.counts()["write"]))
+            lines.append("  write  {}".format(rel))
+        lines.append("\n{} cheat file(s).".format(plan.counts()["write"]))
 
     if plan.warnings:
-        print("\nWarnings:")
+        lines.append("\nWarnings:")
         for warning in plan.warnings:
-            print("  ! {}".format(warning))
+            lines.append("  ! {}".format(warning))
+    return lines
+
+
+def _print_cheats_plan(plan: Plan, root: Path, apply: bool) -> List[str]:
+    lines = _render_cheats_plan(plan, root, apply)
+    print("\n".join(lines))
+    return lines
 
 
 def cmd_cheats(args: argparse.Namespace) -> int:
@@ -126,7 +166,7 @@ def cmd_cheats(args: argparse.Namespace) -> int:
         return 2
 
     plan = plan_cheats(roms_root, cheats_root, cht_root)
-    _print_cheats_plan(plan, cheats_root, apply=args.apply)
+    lines = _print_cheats_plan(plan, cheats_root, apply=args.apply)
 
     if plan.is_empty:
         return 0
@@ -139,9 +179,16 @@ def cmd_cheats(args: argparse.Namespace) -> int:
         execute(plan, force=args.force)
     except PlanError as exc:
         print("\nerror: refusing to apply:\n{}".format(exc), file=sys.stderr)
+        lines = lines + ["", "ERROR: refusing to apply:", str(exc)]
+        print(
+            "\nLog written to: {}".format(
+                _write_run_log(cheats_root, "cheats", lines)
+            )
+        )
         return 1
 
     print("\nApplied.")
+    print("Log written to: {}".format(_write_run_log(cheats_root, "cheats", lines)))
     return 0
 
 

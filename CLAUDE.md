@@ -126,10 +126,20 @@ discs.py -> plan.py -> m3u.py -> cli.py
 
 - **`cli.py`** — argparse front end (`scan`, `m3u`, `cheats` subcommands).
   Thin: builds a plan, prints it, and only calls `plan.execute()` when
-  `--apply` is passed. `m3u` and `scan` share `_print_plan()`; `cheats` has
-  its own `_print_cheats_plan()` since `.cht` files can run to dozens of long
-  code lines each — it prints target paths and the per-system match-count
-  notes, never write content.
+  `--apply` is passed. `_render_plan()`/`_render_cheats_plan()` format the
+  same thing `_print_plan()`/`_print_cheats_plan()` print, as a `List[str]`,
+  so an `--apply` run can also hand it to `_write_run_log()` — every applied
+  `m3u`/`cheats` run writes a `.retro-tools-<command>-log-<timestamp>.txt`
+  next to what it touched (the scanned folder for `m3u`, `--cheats-root` for
+  `cheats`), recording the exact command line and everything that was
+  printed, including a failed apply's `PlanError`. The dotfile name keeps it
+  invisible to every scanner in this repo (`is_candidate_file()` excludes
+  dotfiles). Dry runs are never logged — writing a log is itself a
+  filesystem write, and the dry-run-by-default guarantee above requires
+  `--apply` to be the only thing that touches disk. `cheats` renders
+  compactly (target paths + notes, never write content) for the same reason
+  `_render_cheats_plan()` differs from `_render_plan()`: `.cht` files can run
+  to dozens of long code lines each.
 
 Ambiguous or unsafe-to-silently-resolve situations (multiple cue sheets for
 one disc, a folder mixing several games, a playlist whose name doesn't match
