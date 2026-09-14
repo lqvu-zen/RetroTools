@@ -17,7 +17,7 @@ from __future__ import annotations
 import shlex
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -71,6 +71,15 @@ class FolderPicker(QWidget):
         return Path(text).expanduser() if text else None
 
 
+#: Characters that need a Windows path/argument wrapped in quotes: whitespace
+#: (an argument separator) plus cmd.exe's structural metacharacters, which
+#: split the line into separate commands/pipes/redirections even with no
+#: surrounding space (e.g. a folder named "Roms&Backup"). Verified `echo "a &
+#: b"` prints literally while `echo a&b` splits into two commands -- quoting
+#: does suppress these, the bug was only detecting whitespace as needing it.
+_WIN_SHELL_METACHARS = ' \t&|<>^()!%'
+
+
 def _command_str(parts: Sequence[str]) -> str:
     """Join *parts* into a command line quoted for this platform's shell.
 
@@ -84,10 +93,25 @@ def _command_str(parts: Sequence[str]) -> str:
     """
     if sys.platform == "win32":
         return " ".join(
-            '"{}"'.format(part) if not part or any(c in part for c in " \t") else part
+            '"{}"'.format(part) if not part or any(c in part for c in _WIN_SHELL_METACHARS) else part
             for part in parts
         )
     return shlex.join(parts)
+
+
+def _log_path_or_reason(directory: Path, prefix: str, lines: List[str], command: str) -> str:
+    """write_run_log(), falling back to an inline explanation if that itself fails.
+
+    write_run_log() does its own mkdir/open against *directory* -- the same
+    disk a just-failed apply may have filled up. Without this, a disk-full
+    OSError from execute() could be followed by a second, uncaught OSError
+    from logging that very failure, which would defeat the point of catching
+    the first one.
+    """
+    try:
+        return str(write_run_log(directory, prefix, lines, command))
+    except OSError as exc:
+        return "(could not write log: {})".format(exc)
 
 
 def _make_output() -> QPlainTextEdit:
@@ -250,7 +274,7 @@ class M3UTab(QWidget):
                     "actions above may already have been done:"
                 )
             lines = lines + ["", note, str(exc)]
-            log_path = write_run_log(root, "m3u", lines, command)
+            log_path = _log_path_or_reason(root, "m3u", lines, command)
             self.output.setPlainText("\n".join(lines))
             QMessageBox.critical(
                 self, "Apply failed", "{}\n{}\n\nLog written to:\n{}".format(note, exc, log_path)
@@ -258,7 +282,7 @@ class M3UTab(QWidget):
             self._invalidate()
             return
 
-        log_path = write_run_log(root, "m3u", lines, command)
+        log_path = _log_path_or_reason(root, "m3u", lines, command)
         lines = lines + ["", "Applied.", "Log written to: {}".format(log_path)]
         self.output.setPlainText("\n".join(lines))
         self._invalidate()
@@ -388,7 +412,7 @@ class CheatsTab(QWidget):
                     "actions above may already have been done:"
                 )
             lines = lines + ["", note, str(exc)]
-            log_path = write_run_log(cheats_root, "cheats", lines, command)
+            log_path = _log_path_or_reason(cheats_root, "cheats", lines, command)
             self.output.setPlainText("\n".join(lines))
             QMessageBox.critical(
                 self, "Apply failed", "{}\n{}\n\nLog written to:\n{}".format(note, exc, log_path)
@@ -396,7 +420,7 @@ class CheatsTab(QWidget):
             self._invalidate()
             return
 
-        log_path = write_run_log(cheats_root, "cheats", lines, command)
+        log_path = _log_path_or_reason(cheats_root, "cheats", lines, command)
         lines = lines + ["", "Applied.", "Log written to: {}".format(log_path)]
         self.output.setPlainText("\n".join(lines))
         self._invalidate()
