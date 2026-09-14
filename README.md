@@ -38,6 +38,12 @@ Pick a folder, click **Preview** to see the dry run, then **Apply**. Apply
 stays disabled until you've previewed with the exact options you're about to
 apply — change anything and it's disabled again until you preview once more.
 
+If you manage more than one device or SD card, use the **Device config**
+dropdown at the top of the window: **Save As…** remembers the current Roms
+folder plus the M3U/Cheats options and paths under a name (e.g. "Miyoo Mini",
+"RetroArch PC"); picking a saved name from the dropdown fills all three tabs
+back in. Configs are stored as plain JSON at `~/.retro-tools/configs.json`.
+
 ## Commands
 
 ### `scan`
@@ -144,12 +150,13 @@ Layout:
 
 ```
 retro_tools/
-  discs.py   disc-token parsing and grouping of related files
-  plan.py    Action/Plan types, validation, execution
-  m3u.py     the NextUI multi-disc planners
-  cheats.py  the libretro-database cheat matcher
-  cli.py     argparse front end
-  gui.py     PySide6 front end (optional `gui` extra)
+  discs.py       disc-token parsing and grouping of related files
+  plan.py        Action/Plan types, validation, execution
+  m3u.py         the NextUI multi-disc planners
+  cheats.py      the libretro-database cheat matcher
+  cli.py         argparse front end
+  gui.py         PySide6 front end (optional `gui` extra)
+  gui_configs.py saved "device config" persistence for the GUI (no Qt import)
 ```
 
 `plan.py` is the seam both frontends sit on: build a `Plan`, show it, call

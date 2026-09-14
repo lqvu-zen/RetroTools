@@ -64,11 +64,12 @@ There is no lint/format tooling configured in this repo.
 
 Everything is a **dry run by default** — `--apply` is the only thing that
 touches the filesystem. This is implemented as a strict plan/execute split
-across six modules with a one-directional dependency chain:
+across seven modules with a one-directional dependency chain:
 
 ```
 discs.py -> plan.py -> m3u.py -> cli.py -> gui.py
-                     -> cheats.py -> cli.py
+                     -> cheats.py -> cli.py     ^
+                                gui_configs.py --+
 ```
 
 - **`discs.py`** — pure parsing/grouping, no filesystem writes. `parse_disc()`
@@ -165,8 +166,22 @@ discs.py -> plan.py -> m3u.py -> cli.py -> gui.py
   last previewed (`_form_state()` snapshots path/options and is compared on
   every Apply click) — changing anything after Preview disables Apply again,
   same spirit as the CLI needing a fresh dry-run read before `--apply`.
-  Optional dependency: `pip install -e ".[gui]"`; nothing else in the
-  package imports PySide6.
+  `MainWindow` also owns a "device config" bar above the tabs (a
+  `QComboBox` + Save As…/Delete) built on `gui_configs.py`: **Save As…**
+  snapshots the M3U tab's Roms path plus every tab's own options into one
+  named `DeviceConfig` (so switching devices/SD cards is picking a name, not
+  re-entering folders); selecting a saved name pushes its fields back into
+  Scan/M3U/Cheats. Optional dependency: `pip install -e ".[gui]"`; nothing
+  else in the package imports PySide6.
+
+- **`gui_configs.py`** — persistence for `gui.py`'s device configs: a
+  `DeviceConfig` dataclass plus `load_configs()`/`save_configs()` reading and
+  writing plain JSON at `~/.retro-tools/configs.json`. Deliberately has no
+  Qt import, unlike the rest of the GUI, specifically so it's covered by
+  `tests/test_gui_configs.py` without PySide6 installed — the one piece of
+  `gui.py`'s logic that has automated test coverage. `load_configs()` drops
+  unknown keys and fills missing ones from `DeviceConfig`'s defaults, so a
+  config saved by an older or newer version of this tool still loads.
 
 Ambiguous or unsafe-to-silently-resolve situations (multiple cue sheets for
 one disc, a folder mixing several games, a playlist whose name doesn't match
