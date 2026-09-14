@@ -34,6 +34,10 @@ pip install -e ".[gui]"
 python -m retro_tools gui
 ```
 
+On Windows with [uv](https://docs.astral.sh/uv/) installed, double-click
+`run-gui.bat` instead — it installs the `gui` extra into a `uv`-managed
+virtualenv on first run and launches the window.
+
 Pick a folder, click **Preview** to see the dry run, then **Apply**. Apply
 stays disabled until you've previewed with the exact options you're about to
 apply — change anything and it's disabled again until you preview once more.
