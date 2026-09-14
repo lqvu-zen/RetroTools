@@ -21,7 +21,7 @@ from retro_tools.m3u import (
 from retro_tools.plan import Plan, PlanError, execute
 
 
-def _render_plan(plan: Plan, root: Optional[Path], apply: bool) -> List[str]:
+def render_plan(plan: Plan, root: Optional[Path], apply: bool) -> List[str]:
     lines = []
     for note in plan.notes:
         lines.append("  note: {}".format(note))
@@ -50,14 +50,19 @@ def _render_plan(plan: Plan, root: Optional[Path], apply: bool) -> List[str]:
 
 
 def _print_plan(plan: Plan, root: Optional[Path], apply: bool) -> List[str]:
-    lines = _render_plan(plan, root, apply)
+    lines = render_plan(plan, root, apply)
     print("\n".join(lines))
     return lines
 
 
-def _write_run_log(directory: Path, prefix: str, lines: List[str]) -> Path:
+def write_run_log(directory: Path, prefix: str, lines: List[str], command: str) -> Path:
     """Record what an --apply run did. Never called for a dry run -- writing
-    a log is itself a filesystem write, and dry runs must touch nothing."""
+    a log is itself a filesystem write, and dry runs must touch nothing.
+
+    *command* is the invocation that produced this run: the literal argv for
+    the CLI, or an equivalent CLI-style string synthesized by the GUI, so the
+    log stays a useful, reproducible record regardless of which frontend
+    triggered it."""
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now()
     log_path = directory / ".retro-tools-{}-log-{}.txt".format(
@@ -66,7 +71,7 @@ def _write_run_log(directory: Path, prefix: str, lines: List[str]) -> Path:
     header = [
         "retro-tools {} run log".format(prefix),
         "when: {}".format(timestamp.isoformat(timespec="seconds")),
-        "command: {}".format(shlex.join(sys.argv)),
+        "command: {}".format(command),
         "",
     ]
     with open(log_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -100,22 +105,23 @@ def cmd_m3u(args: argparse.Namespace) -> int:
         print("\nNothing was changed. Re-run with --apply to make it so.")
         return 0
 
+    command = shlex.join(sys.argv)
     try:
         execute(plan, force=args.force)
     except PlanError as exc:
         print("\nerror: refusing to apply:\n{}".format(exc), file=sys.stderr)
         lines = lines + ["", "ERROR: refusing to apply:", str(exc)]
-        print("\nLog written to: {}".format(_write_run_log(root, "m3u", lines)))
+        print("\nLog written to: {}".format(write_run_log(root, "m3u", lines, command)))
         return 1
 
     print("\nApplied.")
-    print("Log written to: {}".format(_write_run_log(root, "m3u", lines)))
+    print("Log written to: {}".format(write_run_log(root, "m3u", lines, command)))
     return 0
 
 
-def _render_cheats_plan(plan: Plan, root: Path, apply: bool) -> List[str]:
+def render_cheats_plan(plan: Plan, root: Path, apply: bool) -> List[str]:
     # .cht files can run to dozens of long code lines each, so unlike
-    # _render_plan(), this deliberately never echoes write content -- just
+    # render_plan(), this deliberately never echoes write content -- just
     # target paths, plus the per-system match-count notes which are what
     # actually matters for reviewing coverage.
     lines = []
@@ -145,7 +151,7 @@ def _render_cheats_plan(plan: Plan, root: Path, apply: bool) -> List[str]:
 
 
 def _print_cheats_plan(plan: Plan, root: Path, apply: bool) -> List[str]:
-    lines = _render_cheats_plan(plan, root, apply)
+    lines = render_cheats_plan(plan, root, apply)
     print("\n".join(lines))
     return lines
 
@@ -175,6 +181,7 @@ def cmd_cheats(args: argparse.Namespace) -> int:
         print("\nNothing was changed. Re-run with --apply to make it so.")
         return 0
 
+    command = shlex.join(sys.argv)
     try:
         execute(plan, force=args.force)
     except PlanError as exc:
@@ -182,30 +189,35 @@ def cmd_cheats(args: argparse.Namespace) -> int:
         lines = lines + ["", "ERROR: refusing to apply:", str(exc)]
         print(
             "\nLog written to: {}".format(
-                _write_run_log(cheats_root, "cheats", lines)
+                write_run_log(cheats_root, "cheats", lines, command)
             )
         )
         return 1
 
     print("\nApplied.")
-    print("Log written to: {}".format(_write_run_log(cheats_root, "cheats", lines)))
+    print(
+        "Log written to: {}".format(
+            write_run_log(cheats_root, "cheats", lines, command)
+        )
+    )
     return 0
 
 
-def cmd_scan(args: argparse.Namespace) -> int:
-    root = Path(args.path).expanduser()
-    if not root.is_dir():
-        print("error: not a folder: {}".format(root), file=sys.stderr)
-        return 2
+def render_scan_report(root: Path) -> List[str]:
+    """Build the lines describing one folder's system folders/tags/counts.
 
+    Assumes *root* is already a real directory -- callers (CLI, GUI) check
+    that first so each can report a "not a folder" error their own way.
+    """
+    lines: List[str] = []
     if looks_like_roms_root(root):
         folders = find_system_folders(root)
-        print("Roms root: {}".format(root))
-        print("{} tagged system folder(s):\n".format(len(folders)))
+        lines.append("Roms root: {}".format(root))
+        lines.append("{} tagged system folder(s):\n".format(len(folders)))
         for folder in folders:
             roms = sum(1 for p in folder.rglob("*") if is_candidate_file(p))
             subs = sum(1 for p in folder.iterdir() if p.is_dir())
-            print(
+            lines.append(
                 "  {:<45} tag={:<8} {:>4} file(s), {:>3} subfolder(s)".format(
                     folder.name, system_tag(folder), roms, subs
                 )
@@ -216,21 +228,43 @@ def cmd_scan(args: argparse.Namespace) -> int:
             if p.is_dir() and not system_tag(p) and not p.name.startswith(".")
         ]
         if untagged:
-            print("\nUntagged folders (NextUI will ignore these):")
+            lines.append("\nUntagged folders (NextUI will ignore these):")
             for folder in untagged:
-                print("  {}".format(folder.name))
-        return 0
+                lines.append("  {}".format(folder.name))
+        return lines
 
     tag = system_tag(root)
-    print("System folder: {} (tag={})".format(root.name, tag or "MISSING"))
+    lines.append("System folder: {} (tag={})".format(root.name, tag or "MISSING"))
     if tag is None:
-        print(
+        lines.append(
             "  ! No uppercase (TAG) suffix. NextUI needs one, e.g. 'NES (FC)',\n"
             "    otherwise the folder will not appear in the menu."
         )
     files = sum(1 for p in root.rglob("*") if is_candidate_file(p))
-    print("  {} candidate file(s)".format(files))
+    lines.append("  {} candidate file(s)".format(files))
+    return lines
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    root = Path(args.path).expanduser()
+    if not root.is_dir():
+        print("error: not a folder: {}".format(root), file=sys.stderr)
+        return 2
+    print("\n".join(render_scan_report(root)))
     return 0
+
+
+def cmd_gui(args: argparse.Namespace) -> int:
+    try:
+        from retro_tools.gui import main as gui_main
+    except ImportError:
+        print(
+            "error: the GUI needs PySide6, which isn't installed.\n"
+            "Install it with: pip install retro-tools[gui]",
+            file=sys.stderr,
+        )
+        return 2
+    return gui_main()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -328,6 +362,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing .cht files that don't already match.",
     )
     cheats.set_defaults(func=cmd_cheats)
+
+    gui = subparsers.add_parser(
+        "gui", help="Launch the graphical interface (needs PySide6)."
+    )
+    gui.set_defaults(func=cmd_gui)
 
     return parser
 

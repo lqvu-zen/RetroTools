@@ -25,6 +25,19 @@ retro-tools m3u E:\Roms
 Both a `Roms` root and a single system folder work as the path — the tool
 detects which one you gave it by looking for the uppercase `(TAG)` suffixes.
 
+## GUI
+
+A Qt window with a tab per command, if you'd rather not use the terminal:
+
+```
+pip install -e ".[gui]"
+python -m retro_tools gui
+```
+
+Pick a folder, click **Preview** to see the dry run, then **Apply**. Apply
+stays disabled until you've previewed with the exact options you're about to
+apply — change anything and it's disabled again until you preview once more.
+
 ## Commands
 
 ### `scan`
@@ -134,10 +147,12 @@ retro_tools/
   discs.py   disc-token parsing and grouping of related files
   plan.py    Action/Plan types, validation, execution
   m3u.py     the NextUI multi-disc planners
+  cheats.py  the libretro-database cheat matcher
   cli.py     argparse front end
+  gui.py     PySide6 front end (optional `gui` extra)
 ```
 
-`plan.py` is the seam a GUI would sit on: build a `Plan`, show it, call
+`plan.py` is the seam both frontends sit on: build a `Plan`, show it, call
 `execute()`.
 
 ## Roadmap
