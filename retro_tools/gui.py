@@ -71,6 +71,25 @@ class FolderPicker(QWidget):
         return Path(text).expanduser() if text else None
 
 
+def _command_str(parts: Sequence[str]) -> str:
+    """Join *parts* into a command line quoted for this platform's shell.
+
+    Used to build the copy-pasteable ``command:`` line in a GUI-triggered
+    run log. ``shlex.join()`` always uses POSIX single-quote rules, which
+    cmd.exe (still the default shell on Windows) doesn't understand -- a
+    quoted path there is parsed as an unrecognized command. On win32, quote
+    with plain double quotes instead, which both cmd.exe and PowerShell
+    accept; Windows paths can't contain `"` (it's an invalid filename
+    character there), so no escaping is needed once wrapped.
+    """
+    if sys.platform == "win32":
+        return " ".join(
+            '"{}"'.format(part) if not part or any(c in part for c in " \t") else part
+            for part in parts
+        )
+    return shlex.join(parts)
+
+
 def _make_output() -> QPlainTextEdit:
     output = QPlainTextEdit()
     output.setReadOnly(True)
@@ -213,7 +232,7 @@ class M3UTab(QWidget):
             return
 
         force = self.force_check.isChecked()
-        command = shlex.join(
+        command = _command_str(
             ["retro-tools", "m3u", str(root), "--layout", self.layout_combo.currentText()]
             + (["--single-disc-folders"] if self.single_disc_check.isChecked() else [])
             + ["--apply"]
@@ -222,12 +241,19 @@ class M3UTab(QWidget):
         lines = render_plan(plan, root, apply=True)
         try:
             execute(plan, force=force)
-        except PlanError as exc:
-            lines = lines + ["", "ERROR: refusing to apply:", str(exc)]
+        except (PlanError, OSError) as exc:
+            if isinstance(exc, PlanError):
+                note = "ERROR: refusing to apply:"
+            else:
+                note = (
+                    "ERROR: apply failed partway through -- some of the "
+                    "actions above may already have been done:"
+                )
+            lines = lines + ["", note, str(exc)]
             log_path = write_run_log(root, "m3u", lines, command)
             self.output.setPlainText("\n".join(lines))
             QMessageBox.critical(
-                self, "Apply failed", "{}\n\nLog written to:\n{}".format(exc, log_path)
+                self, "Apply failed", "{}\n{}\n\nLog written to:\n{}".format(note, exc, log_path)
             )
             self._invalidate()
             return
@@ -337,7 +363,7 @@ class CheatsTab(QWidget):
             return
 
         force = self.force_check.isChecked()
-        command = shlex.join(
+        command = _command_str(
             [
                 "retro-tools",
                 "cheats",
@@ -353,12 +379,19 @@ class CheatsTab(QWidget):
         lines = render_cheats_plan(plan, cheats_root, apply=True)
         try:
             execute(plan, force=force)
-        except PlanError as exc:
-            lines = lines + ["", "ERROR: refusing to apply:", str(exc)]
+        except (PlanError, OSError) as exc:
+            if isinstance(exc, PlanError):
+                note = "ERROR: refusing to apply:"
+            else:
+                note = (
+                    "ERROR: apply failed partway through -- some of the "
+                    "actions above may already have been done:"
+                )
+            lines = lines + ["", note, str(exc)]
             log_path = write_run_log(cheats_root, "cheats", lines, command)
             self.output.setPlainText("\n".join(lines))
             QMessageBox.critical(
-                self, "Apply failed", "{}\n\nLog written to:\n{}".format(exc, log_path)
+                self, "Apply failed", "{}\n{}\n\nLog written to:\n{}".format(note, exc, log_path)
             )
             self._invalidate()
             return
