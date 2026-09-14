@@ -444,18 +444,22 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.m3u_tab, "M3U Playlists")
         tabs.addTab(self.cheats_tab, "Cheats")
 
-        self.configs: Dict[str, DeviceConfig] = load_configs()
-        self.config_combo = QComboBox()
+        self.configs: Dict[str, Dict[str, DeviceConfig]] = load_configs()
+        self.device_combo = QComboBox()
+        self.os_combo = QComboBox()
         save_btn = QPushButton("Save As…")
         delete_btn = QPushButton("Delete")
         save_btn.clicked.connect(self._save_config)
         delete_btn.clicked.connect(self._delete_config)
-        self.config_combo.activated.connect(self._load_selected_config)
-        self._refresh_config_combo()
+        self.device_combo.activated.connect(self._on_device_selected)
+        self.os_combo.activated.connect(self._load_selected_config)
+        self._refresh_device_combo()
 
         config_bar = QHBoxLayout()
-        config_bar.addWidget(QLabel("Device config:"))
-        config_bar.addWidget(self.config_combo, 1)
+        config_bar.addWidget(QLabel("Device:"))
+        config_bar.addWidget(self.device_combo, 1)
+        config_bar.addWidget(QLabel("OS:"))
+        config_bar.addWidget(self.os_combo, 1)
         config_bar.addWidget(save_btn)
         config_bar.addWidget(delete_btn)
 
@@ -465,23 +469,41 @@ class MainWindow(QMainWindow):
         layout.addWidget(tabs)
         self.setCentralWidget(central)
 
-    def _refresh_config_combo(self, select: Optional[str] = None) -> None:
-        self.config_combo.blockSignals(True)
-        self.config_combo.clear()
-        self.config_combo.addItem("")
-        for name in sorted(self.configs):
-            self.config_combo.addItem(name)
+    def _refresh_device_combo(self, select: Optional[str] = None) -> None:
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        self.device_combo.addItem("")
+        for device in sorted(self.configs):
+            self.device_combo.addItem(device)
         if select is not None:
-            index = self.config_combo.findText(select)
+            index = self.device_combo.findText(select)
             if index >= 0:
-                self.config_combo.setCurrentIndex(index)
-        self.config_combo.blockSignals(False)
+                self.device_combo.setCurrentIndex(index)
+        self.device_combo.blockSignals(False)
+        self._refresh_os_combo()
+
+    def _refresh_os_combo(self, select: Optional[str] = None) -> None:
+        os_map = self.configs.get(self.device_combo.currentText(), {})
+        self.os_combo.blockSignals(True)
+        self.os_combo.clear()
+        self.os_combo.addItem("")
+        for os_name in sorted(os_map):
+            self.os_combo.addItem(os_name)
+        if select is not None:
+            index = self.os_combo.findText(select)
+            if index >= 0:
+                self.os_combo.setCurrentIndex(index)
+        self.os_combo.blockSignals(False)
+
+    def _on_device_selected(self) -> None:
+        self._refresh_os_combo()
 
     def _load_selected_config(self) -> None:
-        name = self.config_combo.currentText()
-        if not name:
+        device = self.device_combo.currentText()
+        os_name = self.os_combo.currentText()
+        if not device or not os_name:
             return
-        config = self.configs.get(name)
+        config = self.configs.get(device, {}).get(os_name)
         if config is None:
             return
 
@@ -496,17 +518,23 @@ class MainWindow(QMainWindow):
         self.cheats_tab.force_check.setChecked(config.cheats_force)
 
     def _save_config(self) -> None:
-        name, ok = QInputDialog.getText(
-            self, "Save device config", "Name:", text=self.config_combo.currentText()
+        device, ok = QInputDialog.getText(
+            self, "Save device config", "Device:", text=self.device_combo.currentText()
         )
-        name = name.strip()
-        if not ok or not name:
+        device = device.strip()
+        if not ok or not device:
             return
-        if name in self.configs:
+        os_name, ok = QInputDialog.getText(
+            self, "Save device config", "OS:", text=self.os_combo.currentText()
+        )
+        os_name = os_name.strip()
+        if not ok or not os_name:
+            return
+        if os_name in self.configs.get(device, {}):
             confirm = QMessageBox.question(
                 self,
                 "Overwrite config",
-                "A device config named '{}' already exists. Overwrite it?".format(name),
+                "A config for '{}' — '{}' already exists. Overwrite it?".format(device, os_name),
             )
             if confirm != QMessageBox.StandardButton.Yes:
                 return
@@ -515,7 +543,7 @@ class MainWindow(QMainWindow):
         # across all three tabs -- if Scan or Cheats' own roms folder field
         # was edited to something different after loading, that's on the
         # user; the next Load resyncs all three from this single value.
-        self.configs[name] = DeviceConfig(
+        self.configs.setdefault(device, {})[os_name] = DeviceConfig(
             roms_path=self.m3u_tab.picker.edit.text().strip(),
             m3u_layout=self.m3u_tab.layout_combo.currentText(),
             m3u_single_disc_folders=self.m3u_tab.single_disc_check.isChecked(),
@@ -525,20 +553,28 @@ class MainWindow(QMainWindow):
             cheats_force=self.cheats_tab.force_check.isChecked(),
         )
         save_configs(self.configs)
-        self._refresh_config_combo(select=name)
+        self._refresh_device_combo(select=device)
+        self._refresh_os_combo(select=os_name)
 
     def _delete_config(self) -> None:
-        name = self.config_combo.currentText()
-        if not name:
+        device = self.device_combo.currentText()
+        os_name = self.os_combo.currentText()
+        if not device or not os_name:
             return
         confirm = QMessageBox.question(
-            self, "Delete device config", "Delete the saved config '{}'?".format(name)
+            self,
+            "Delete device config",
+            "Delete the saved config '{}' — '{}'?".format(device, os_name),
         )
         if confirm != QMessageBox.StandardButton.Yes:
             return
-        self.configs.pop(name, None)
+        os_map = self.configs.get(device)
+        if os_map is not None:
+            os_map.pop(os_name, None)
+            if not os_map:
+                self.configs.pop(device, None)
         save_configs(self.configs)
-        self._refresh_config_combo()
+        self._refresh_device_combo()
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

@@ -166,22 +166,28 @@ discs.py -> plan.py -> m3u.py -> cli.py -> gui.py
   last previewed (`_form_state()` snapshots path/options and is compared on
   every Apply click) — changing anything after Preview disables Apply again,
   same spirit as the CLI needing a fresh dry-run read before `--apply`.
-  `MainWindow` also owns a "device config" bar above the tabs (a
-  `QComboBox` + Save As…/Delete) built on `gui_configs.py`: **Save As…**
-  snapshots the M3U tab's Roms path plus every tab's own options into one
-  named `DeviceConfig` (so switching devices/SD cards is picking a name, not
-  re-entering folders); selecting a saved name pushes its fields back into
-  Scan/M3U/Cheats. Optional dependency: `pip install -e ".[gui]"`; nothing
-  else in the package imports PySide6.
+  `MainWindow` also owns a "device config" bar above the tabs (two
+  `QComboBox`es — Device, then OS — plus Save As…/Delete) built on
+  `gui_configs.py`: **Save As…** snapshots the M3U tab's Roms path plus every
+  tab's own options into one `DeviceConfig` saved under a device name and an
+  OS name (so a TrimUI Brick running NextUI and the same TrimUI Brick running
+  Spruce OS are two leaves under one device, not one flat name); picking a
+  saved Device then OS pushes its fields back into Scan/M3U/Cheats. Picking a
+  device alone just repopulates the OS dropdown for that device — nothing
+  loads until an OS is also picked. Optional dependency:
+  `pip install -e ".[gui]"`; nothing else in the package imports PySide6.
 
 - **`gui_configs.py`** — persistence for `gui.py`'s device configs: a
   `DeviceConfig` dataclass plus `load_configs()`/`save_configs()` reading and
-  writing plain JSON at `~/.retro-tools/configs.json`. Deliberately has no
-  Qt import, unlike the rest of the GUI, specifically so it's covered by
-  `tests/test_gui_configs.py` without PySide6 installed — the one piece of
-  `gui.py`'s logic that has automated test coverage. `load_configs()` drops
-  unknown keys and fills missing ones from `DeviceConfig`'s defaults, so a
-  config saved by an older or newer version of this tool still loads.
+  writing `{device: {os: DeviceConfig}}` as plain JSON at
+  `~/.retro-tools/configs.json`. Deliberately has no Qt import, unlike the
+  rest of the GUI, specifically so it's covered by `tests/test_gui_configs.py`
+  without PySide6 installed — the one piece of `gui.py`'s logic that has
+  automated test coverage. `load_configs()` drops unknown `DeviceConfig`
+  fields and fills missing ones from its defaults, so a config saved by an
+  older or newer version of this tool still loads; a device or OS entry
+  that isn't shaped like a nested mapping is skipped, and a device left with
+  no valid OS entries is dropped entirely.
 
 Ambiguous or unsafe-to-silently-resolve situations (multiple cue sheets for
 one disc, a folder mixing several games, a playlist whose name doesn't match

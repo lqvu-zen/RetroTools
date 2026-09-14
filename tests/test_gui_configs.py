@@ -20,14 +20,17 @@ class ConfigPersistenceTests(unittest.TestCase):
 
     def test_round_trip(self):
         configs = {
-            "Miyoo Mini": DeviceConfig(
-                roms_path="D:/Roms",
-                m3u_layout="nextui",
-                m3u_single_disc_folders=True,
-                cheats_root="D:/Cheats",
-                cheats_chtdb="D:/libretro-database/cht",
-            ),
-            "RetroArch PC": DeviceConfig(roms_path="E:/Roms", m3u_layout="flat"),
+            "TrimUI Brick": {
+                "NextUI": DeviceConfig(
+                    roms_path="D:/Roms",
+                    m3u_layout="nextui",
+                    m3u_single_disc_folders=True,
+                    cheats_root="D:/Cheats",
+                    cheats_chtdb="D:/libretro-database/cht",
+                ),
+                "Spruce OS": DeviceConfig(roms_path="D:/SpruceRoms", m3u_layout="flat"),
+            },
+            "RetroArch PC": {"Windows": DeviceConfig(roms_path="E:/Roms", m3u_layout="flat")},
         }
         save_configs(configs, self.path)
         self.assertEqual(load_configs(self.path), configs)
@@ -45,20 +48,25 @@ class ConfigPersistenceTests(unittest.TestCase):
     def test_unknown_and_missing_fields_tolerated(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
-            '{"Old Device": {"roms_path": "D:/Roms", "future_field": 123}}',
+            '{"Old Device": {"NextUI": {"roms_path": "D:/Roms", "future_field": 123}}}',
             encoding="utf-8",
         )
         loaded = load_configs(self.path)
-        self.assertEqual(loaded["Old Device"], DeviceConfig(roms_path="D:/Roms"))
+        self.assertEqual(loaded["Old Device"]["NextUI"], DeviceConfig(roms_path="D:/Roms"))
 
-    def test_non_dict_entry_skipped(self):
+    def test_non_dict_os_entry_skipped(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text('{"Bad": {"NextUI": "not-an-object"}}', encoding="utf-8")
+        self.assertEqual(load_configs(self.path), {})
+
+    def test_non_dict_device_entry_skipped(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text('{"Bad": "not-an-object"}', encoding="utf-8")
         self.assertEqual(load_configs(self.path), {})
 
     def test_save_creates_parent_directory(self):
         nested = Path(self.tmpdir.name) / "nested" / "dir" / "configs.json"
-        save_configs({"x": DeviceConfig(roms_path="D:/Roms")}, nested)
+        save_configs({"x": {"y": DeviceConfig(roms_path="D:/Roms")}}, nested)
         self.assertTrue(nested.is_file())
 
 

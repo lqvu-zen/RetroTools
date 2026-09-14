@@ -42,11 +42,13 @@ Pick a folder, click **Preview** to see the dry run, then **Apply**. Apply
 stays disabled until you've previewed with the exact options you're about to
 apply — change anything and it's disabled again until you preview once more.
 
-If you manage more than one device or SD card, use the **Device config**
-dropdown at the top of the window: **Save As…** remembers the current Roms
-folder plus the M3U/Cheats options and paths under a name (e.g. "Miyoo Mini",
-"RetroArch PC"); picking a saved name from the dropdown fills all three tabs
-back in. Configs are stored as plain JSON at `~/.retro-tools/configs.json`.
+If you manage more than one device, SD card, or OS on the same handheld, use
+the **Device**/**OS** dropdowns at the top of the window: **Save As…**
+remembers the current Roms folder plus the M3U/Cheats options and paths under
+a device name and an OS name (e.g. "TrimUI Brick" + "NextUI" vs. "TrimUI
+Brick" + "Spruce OS" — same device, different folder conventions); picking a
+saved Device then OS fills all three tabs back in. Configs are stored as
+plain JSON at `~/.retro-tools/configs.json`.
 
 ## Commands
 
