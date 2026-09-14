@@ -23,6 +23,10 @@ of the [libretro-database](https://github.com/libretro/libretro-database)
 `cht/` folder and writes NextUI/MinUI-format `.cht` files under a separate
 `--cheats-root`. See `cheats.py` below.
 
+A Qt GUI (`gui.py`) covers `scan`/`m3u`/`cheats` in one window. It needs
+PySide6, an optional dependency (`pip install -e ".[gui]"`); nothing else in
+the package imports it, so a CLI-only install is unaffected.
+
 ## Commands
 
 Run tests:
@@ -48,16 +52,22 @@ Editable install (exposes the `retro-tools` command):
 pip install -e .
 ```
 
+Run the GUI (needs the optional `gui` extra):
+```
+pip install -e ".[gui]"
+python -m retro_tools gui
+```
+
 There is no lint/format tooling configured in this repo.
 
 ## Architecture
 
 Everything is a **dry run by default** — `--apply` is the only thing that
 touches the filesystem. This is implemented as a strict plan/execute split
-across five modules with a one-directional dependency chain:
+across six modules with a one-directional dependency chain:
 
 ```
-discs.py -> plan.py -> m3u.py -> cli.py
+discs.py -> plan.py -> m3u.py -> cli.py -> gui.py
                      -> cheats.py -> cli.py
 ```
 
@@ -124,22 +134,39 @@ discs.py -> plan.py -> m3u.py -> cli.py
   e.g. romhacks/translations with no upstream cheat entry) — only summarized
   via a per-system `plan.note()` of matched-vs-total.
 
-- **`cli.py`** — argparse front end (`scan`, `m3u`, `cheats` subcommands).
-  Thin: builds a plan, prints it, and only calls `plan.execute()` when
-  `--apply` is passed. `_render_plan()`/`_render_cheats_plan()` format the
-  same thing `_print_plan()`/`_print_cheats_plan()` print, as a `List[str]`,
-  so an `--apply` run can also hand it to `_write_run_log()` — every applied
-  `m3u`/`cheats` run writes a `.retro-tools-<command>-log-<timestamp>.txt`
-  next to what it touched (the scanned folder for `m3u`, `--cheats-root` for
-  `cheats`), recording the exact command line and everything that was
-  printed, including a failed apply's `PlanError`. The dotfile name keeps it
-  invisible to every scanner in this repo (`is_candidate_file()` excludes
-  dotfiles). Dry runs are never logged — writing a log is itself a
-  filesystem write, and the dry-run-by-default guarantee above requires
-  `--apply` to be the only thing that touches disk. `cheats` renders
-  compactly (target paths + notes, never write content) for the same reason
-  `_render_cheats_plan()` differs from `_render_plan()`: `.cht` files can run
-  to dozens of long code lines each.
+- **`cli.py`** — argparse front end (`scan`, `m3u`, `cheats`, `gui`
+  subcommands). Thin: builds a plan, prints it, and only calls
+  `plan.execute()` when `--apply` is passed. `render_plan()`/
+  `render_cheats_plan()` format the same thing `_print_plan()`/
+  `_print_cheats_plan()` print, as a `List[str]`, so an `--apply` run can
+  also hand it to `write_run_log()` — every applied `m3u`/`cheats` run
+  writes a `.retro-tools-<command>-log-<timestamp>.txt` next to what it
+  touched (the scanned folder for `m3u`, `--cheats-root` for `cheats`),
+  recording a `command` string (the literal CLI argv, or an equivalent
+  string the GUI synthesizes) and everything that was printed, including a
+  failed apply's `PlanError`. The dotfile name keeps it invisible to every
+  scanner in this repo (`is_candidate_file()` excludes dotfiles). Dry runs
+  are never logged — writing a log is itself a filesystem write, and the
+  dry-run-by-default guarantee above requires `--apply` to be the only thing
+  that touches disk. `cheats` renders compactly (target paths + notes, never
+  write content) for the same reason `render_cheats_plan()` differs from
+  `render_plan()`: `.cht` files can run to dozens of long code lines each.
+  These render/log functions (plus `render_scan_report()`, extracted from
+  `cmd_scan()`) are exported specifically so `gui.py` can reuse them rather
+  than re-implementing output formatting. `cmd_gui()` imports `gui.py` lazily
+  so a CLI-only install (no PySide6) never fails just from importing `cli.py`.
+
+- **`gui.py`** — a PySide6 window with one tab per subcommand (`scan`,
+  `m3u`, `cheats`), sitting on the same plan/execute seam as the CLI: each
+  tab's Preview button builds a `Plan` via the same `m3u.py`/`cheats.py`
+  planners the CLI uses and renders it with `cli.py`'s `render_plan()`/
+  `render_cheats_plan()`, so the two frontends describe a plan identically.
+  Apply only stays enabled while the on-screen options still match what was
+  last previewed (`_form_state()` snapshots path/options and is compared on
+  every Apply click) — changing anything after Preview disables Apply again,
+  same spirit as the CLI needing a fresh dry-run read before `--apply`.
+  Optional dependency: `pip install -e ".[gui]"`; nothing else in the
+  package imports PySide6.
 
 Ambiguous or unsafe-to-silently-resolve situations (multiple cue sheets for
 one disc, a folder mixing several games, a playlist whose name doesn't match

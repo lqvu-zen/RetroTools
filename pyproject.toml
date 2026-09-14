@@ -10,8 +10,12 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.5"]
+
 [project.scripts]
 retro-tools = "retro_tools.cli:main"
+retro-tools-gui = "retro_tools.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["retro_tools*"]
